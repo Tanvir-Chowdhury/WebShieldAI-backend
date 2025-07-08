@@ -16,6 +16,9 @@ class WebsiteCreate(BaseModel):
     name: str
     url: str
     user_id: int
+    defacement_enabled: bool
+    sqli_enabled: bool
+    dom_enabled: bool
 
 class GetWebsite(BaseModel):
     id: int
