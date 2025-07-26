@@ -8,17 +8,53 @@ from fastapi import Request
 from models import SQLLog
 from ml_model import predict_query
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(title="WebShieldAI API")
 
 create_table()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or ["*"] for all origins (less secure)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # defacement_loop.run_deface_loop(app)
 
 @app.post("/users/", response_model=schemas.GetUser)
 async def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return services.create_user(user, db)
+  
+@app.post("/login")
+async def login(user: schemas.UserLogin, request: Request, db: Session = Depends(get_db)):
+    db_user = services.authenticate_user(user.email, user.password, db)
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    request.session["user_id"] = db_user.id
+    request.session["user_email"] = db_user.email
+    return {"message": "Login successful", "user": {"email": db_user.email, "name": db_user.name, "plan": db_user.plan}}
+
+
+@app.get("/me")
+async def get_me(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user = db.query(models.User).get(user_id)
+    return {"email": user.email, "name": user.name, "plan": user.plan}
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return {"message": "Logged out successfully"}
+
 
 @app.post("/websites/", response_model=schemas.GetWebsite)
 async def create_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
@@ -55,6 +91,20 @@ async def collect_sqli(request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "ok", "prediction": prediction, "confidence": confidence}
+  
+
+@app.post("/collect-dom")
+async def collect_dom(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    website_id = data.get("website_id")
+    log = data.get("log")
+
+    input_log = schemas.DOMLog(
+        website_id=website_id,
+        log = log
+    )
+
+    return services.process_dom_log(input_log, db)
 
 
 @app.get("/cdn/webshield-agent.js")
@@ -64,7 +114,7 @@ def serve_agent(request: Request):
     js_code = f"""
 (function () {{
   const WEBSITE_ID = {website_id};
-  const API_URL = "http://localhost:8000/collect-sqli";
+  const API_URL = "http://127.0.0.1:8000/collect-sqli";
 
   function sendSQLQuery(value, callback) {{
     fetch(API_URL, {{
@@ -82,11 +132,11 @@ def serve_agent(request: Request):
       if (data.prediction === "malicious") {{
         alert("SQL Injection attempt detected!");
       }}
-      callback(null, data);  // ✅ Call the callback with result
+      callback(null, data);  
     }})
     .catch(err => {{
       console.error("Error:", err);
-      callback(err, null);  // ✅ Handle errors
+      callback(err, null); 
     }});
   }}
 
@@ -123,10 +173,10 @@ def serve_agent(request: Request):
           completed++;
           if (completed === valuesToCheck.length) {{
             if (!maliciousDetected) {{
-              console.log("✅ All inputs are clean. Submitting form...");
-              e.target.form.submit();  // ✅ Now form will submit
+              console.log("All inputs are clean. Submitting form...");
+              e.target.form.submit();  
             }} else {{
-              console.warn("🚫 Malicious input detected. Form blocked.");
+              console.warn("Malicious input detected. Form blocked.");
             }}
           }}
         }}
@@ -158,61 +208,34 @@ def serve_agent(request: Request):
 }})();
 """
 
-
-
     return Response(content=js_code, media_type="application/javascript")
-
 
 @app.get("/cdn/dom-agent.js")
 def serve_dom_agent(request: Request):
     website_id = request.query_params.get("wid", "0")
 
     js_code = f"""
-    (function () {{
-      const WEBSITE_ID = {website_id};
-      const API_URL = "http://localhost:29900/predict-dom";
-
-      function summarizeMutations(mutationsList) {{
-        const summary = new Set();
-        mutationsList.forEach(mutation => {{
-          let type = mutation.type;
-          let tag = (mutation.target && mutation.target.tagName) || "UNKNOWN";
-          summary.add(`${{type}}:${{tag}}`);
-        }});
-        return Array.from(summary).join("|");
+(function () {{
+  const observer = new MutationObserver(function (mutations) {{
+    for (const mutation of mutations) {{
+      if (
+        mutation.type === "childList" &&
+        (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)
+      ) {{
+        console.warn("DOM added/removed — reloading page...");
+        location.reload();
+        break;
       }}
+    }}
+  }});
 
-      const observer = new MutationObserver((mutationsList) => {{
-        const summary = summarizeMutations(mutationsList);
+  observer.observe(document.documentElement || document.body, {{
+    childList: true,
+    subtree: true,
+  }});
 
-        fetch(API_URL, {{
-          method: "POST",
-          headers: {{
-            "Content-Type": "application/json"
-          }},
-          body: JSON.stringify({{
-            website_id: WEBSITE_ID,
-            mutations: summary
-          }})
-        }})
-        .then(res => res.json())
-        .then(data => {{
-          if (data.prediction === "manipulated") {{
-            console.warn("Suspicious DOM manipulation detected!");
-          }}
-        }})
-        .catch(err => console.error("DOM logging error:", err));
-      }});
-
-      observer.observe(document.body, {{
-        attributes: true,
-        childList: true,
-        subtree: true,
-        characterData: true
-      }});
-
-      console.log("DOM Agent running for Website ID:", WEBSITE_ID);
-    }})();
+  console.log("✅ DOM protection agent is active.");
+}})();
     """
-
     return Response(content=js_code, media_type="application/javascript")
+

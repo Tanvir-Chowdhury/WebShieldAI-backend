@@ -59,7 +59,6 @@ def run_defacement_monitor(website_id, website_url):
             )
             db.add(log)
 
-            # Delete logs older than 60 minutes
             cutoff_time = timestamp - timedelta(minutes=60)
             db.query(DefacementLog).filter(
                 DefacementLog.website_id == website_id,

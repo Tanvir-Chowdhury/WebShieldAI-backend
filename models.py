@@ -7,7 +7,9 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
+    name = Column(String)
     plan = Column(String, default='free')
+    hashed_password = Column(String)
     websites = relationship("Website", back_populates="owner")
 
 class Website(Base):
