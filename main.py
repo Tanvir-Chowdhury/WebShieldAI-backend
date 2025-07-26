@@ -1,14 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from db import create_table, get_db
 from sqlalchemy.orm import Session
 import models, schemas, services
-import defacement_loop 
+# import defacement_loop 
 from defacement_control import toggle_defacement
 from fastapi import Request
 from models import SQLLog
 from ml_model import predict_query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 
 app = FastAPI(title="WebShieldAI API")
@@ -22,7 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SessionMiddleware, secret_key="9f2b3a6e5c7c4965b5c3d11ecac7d6f1bd8446e23c4db487915b6a04e7db47bc")
 
+# 9f2b3a6e5c7c4965b5c3d11ecac7d6f1bd8446e23c4db487915b6a04e7db47bc
 # defacement_loop.run_deface_loop(app)
 
 @app.post("/users/", response_model=schemas.GetUser)
@@ -47,7 +50,12 @@ async def get_me(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     user = db.query(models.User).get(user_id)
-    return {"email": user.email, "name": user.name, "plan": user.plan}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "plan": user.plan
+    }
 
 
 @app.post("/logout")
