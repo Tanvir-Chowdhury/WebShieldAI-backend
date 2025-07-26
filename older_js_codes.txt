@@ -1,0 +1,48 @@
+f"""
+    (function () {{
+      const WEBSITE_ID = {website_id};
+      const API_URL = "http://localhost:8000/collect-sqli";
+
+      function extractFormData(form) {{
+        const formData = new FormData(form);
+        const params = new URLSearchParams();
+        for (const [key, value] of formData.entries()) {{
+          params.append(key, value);
+        }}
+        return params.toString();
+      }}
+
+      function sendSQLQuery(queryString) {{
+        fetch(API_URL, {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            website_id: WEBSITE_ID,
+            query: queryString,
+          }}),
+        }})
+        .then(res => res.json())
+        .then(data => {{
+          if (data.prediction === "malicious") {{
+            alert("SQL Injection attempt detected!");
+          }}
+        }})
+        .catch(err => console.error("Error:", err));
+      }}
+
+      document.addEventListener("submit", function(e) {{
+        const form = e.target;
+        if (form.tagName === "FORM") {{
+          const query = extractFormData(form);
+          sendSQLQuery(query);
+        }}
+      }});
+
+      const queryString = window.location.search;
+      if (queryString) {{
+        sendSQLQuery(queryString);
+      }}
+
+      console.log("WebShield Agent active for Website ID:", WEBSITE_ID);
+    }})();
+    """

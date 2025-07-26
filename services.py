@@ -19,6 +19,8 @@ def create_website(website: schemas.WebsiteCreate, db: Session):
     return new_website
 
 def process_sql_query(input: SQLQuery, db: Session):
+    if input.query is None or input.query.strip() == "":
+        return {"prediction": 0, "confidence": 0}
     label, score = predict_query(input.query)
 
     log = SQLLog(

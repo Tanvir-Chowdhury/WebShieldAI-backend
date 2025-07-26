@@ -5,20 +5,20 @@ from keras.preprocessing.sequence import pad_sequences
 import joblib
 
 tokenizer = Tokenizer(num_words=1000, oov_token="<OOV>")
-max_length = 50
+max_length = 30
 
 model = load_model("ml/sqli_classifier_model.h5")
 
 def prepare_query(query):
     tokenizer.fit_on_texts([query])
     sequences = tokenizer.texts_to_sequences([query])
-    padded = pad_sequences(sequences, maxlen=max_length, padding='post', truncating='post')
+    padded = pad_sequences(sequences, maxlen=max_length, padding='post') #truncating='post'
     return padded
 
 def predict_query(query):
     processed = prepare_query(query)
     prediction = model.predict(processed)[0][0]
-    label = "malicious" if prediction >= 0.5 else "normal"
+    label = "malicious" if prediction >= 0.8 else "normal"
     return label, float(prediction)
 
 dom_model = joblib.load("ml/dom_model.pkl")
