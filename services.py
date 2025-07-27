@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session
-from models import SQLLog, DOMLog, User, Website
+from models import SQLLog, DomManipulationLog, User, Website
 from schemas import SQLQuery
 from ml_model import predict_query, predict_dom_mutation
 import models,schemas
 from passlib.context import CryptContext
+from fastapi import Depends, Request
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -59,18 +60,18 @@ def process_sql_query(input: SQLQuery, db: Session):
     return {"prediction": label, "confidence": score}
 
 
-def process_dom_log(input: schemas.DOMLog, db: Session):
-    label, score = predict_dom_mutation(input.log)
+def log_dom_event(
+    log: schemas.DomLogCreate,
+    request: Request,
+    db: Session
+):
+    client_ip = request.client.host
 
-    log = DOMLog(
-        website_id=input.website_id,
-        mutations=input.log,
-        prediction=label,
-        score=score
+    new_log = DomManipulationLog(
+        website_id=log.website_id,
+        ip_address=client_ip
     )
-
-    db.add(log)
+    db.add(new_log)
     db.commit()
-    db.refresh(log)
-
-    return {"prediction": label, "confidence": score}
+    db.refresh(new_log)
+    return {"message": "Logged", "log_id": new_log.id}

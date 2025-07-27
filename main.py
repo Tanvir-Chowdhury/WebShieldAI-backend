@@ -73,9 +73,6 @@ async def create_website(website: schemas.WebsiteCreate, db: Session = Depends(g
 async def predict_sql_query(input: schemas.SQLQuery, db: Session = Depends(get_db)):
     return services.process_sql_query(input, db)
 
-@app.post("/predict-dom/")
-async def predict_dom_log(input: schemas.DOMLog, db: Session = Depends(get_db)):
-    return services.process_dom_log(input, db)
 
 @app.post("/websites/{website_id}/toggle-defacement/")
 async def toggle_defacement_route(website_id: int, enable: bool):
@@ -100,19 +97,6 @@ async def collect_sqli(request: Request, db: Session = Depends(get_db)):
 
     return {"status": "ok", "prediction": prediction, "confidence": confidence}
   
-
-@app.post("/collect-dom")
-async def collect_dom(request: Request, db: Session = Depends(get_db)):
-    data = await request.json()
-    website_id = data.get("website_id")
-    log = data.get("log")
-
-    input_log = schemas.DOMLog(
-        website_id=website_id,
-        log = log
-    )
-
-    return services.process_dom_log(input_log, db)
 
 
 @app.get("/cdn/webshield-agent.js")
@@ -212,38 +196,152 @@ def serve_agent(request: Request):
     }});
   }}
 
-  console.log("WebShield Agent active for Website ID:", WEBSITE_ID);
+  console.log("WebShield SQLI Agent active for Website ID:", WEBSITE_ID);
 }})();
 """
 
     return Response(content=js_code, media_type="application/javascript")
 
-@app.get("/cdn/dom-agent.js")
-def serve_dom_agent(request: Request):
+@app.get("/cdn/webshield-xss-agent.js")
+def serve_xss_agent(request: Request, db: Session = Depends(get_db)):
     website_id = request.query_params.get("wid", "0")
+  
+    client_ip = request.client.host
+
+    # Store log immediately in DB (as this JS is being served)
+    new_log = models.DomManipulationLog(
+        website_id=website_id,
+        ip_address=client_ip
+    )
+    db.add(new_log)
+    db.commit()
+  
+    js_code = """
+(function () {{
+  const suspiciousPatterns = [
+    /<script.*?>.*?<\\/script>/i,
+    /javascript:/i,
+    /onerror\\s*=\\s*/i,
+    /onload\\s*=\\s*/i,
+    /<.*?on\\w+\\s*=\\s*['"].*?['"].*?>/i,
+    /document\\.cookie/i,
+    /<iframe/i,
+    /<img.*?src=.*?>/i
+  ];
+
+  function isMalicious(value) {{
+    return suspiciousPatterns.some(pattern => pattern.test(value));
+  }}
+
+  function checkInputsAndAlert() {{
+    const inputs = document.querySelectorAll("input[type='text'], textarea");
+
+    for (let input of inputs) {{
+      const value = input.value.trim();
+      if (value && isMalicious(value)) {{
+        alert("Script Injection Detected in input!");
+        window.location.href = "/";
+        return true;
+      }}
+    }}
+    return false;
+  }}
+
+  function checkURLParams() {{
+    const params = new URLSearchParams(window.location.search);
+    for (let [key, value] of params.entries()) {{
+      if (value && isMalicious(decodeURIComponent(value))) {{
+        alert("Script Injection Detected in URL!");
+        window.location.href = "/";
+        return true;
+      }}
+    }}
+    return false;
+  }}
+
+  // Run on page load
+  document.addEventListener("DOMContentLoaded", function () {{
+    if (checkInputsAndAlert()) return;
+    if (checkURLParams()) return;
+
+    // Re-check on form submit
+    const forms = document.querySelectorAll("form");
+    for (let form of forms) {{
+      form.addEventListener("submit", function (e) {{
+        if (checkInputsAndAlert()) {{
+          e.preventDefault();
+        }}
+      }});
+    }}
+  }});
+ 
+  console.log("WebShield XSS Agent Activated");
+}})();
+"""
+    return Response(content=js_code, media_type="application/javascript")
+
+
+@app.get("/cdn/dom-defacement-agent.js")
+def serve_dom_defacement_agent(request: Request, db: Session = Depends(get_db)):
+    website_id = request.query_params.get("wid", "0")
+
+    client_ip = request.client.host
+
+    # Store log immediately in DB (as this JS is being served)
+    new_log = models.DomManipulationLog(
+        website_id=website_id,
+        ip_address=client_ip
+    )
+    db.add(new_log)
+    db.commit()
 
     js_code = f"""
 (function () {{
-  const observer = new MutationObserver(function (mutations) {{
-    for (const mutation of mutations) {{
-      if (
-        mutation.type === "childList" &&
-        (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)
-      ) {{
-        console.warn("DOM added/removed — reloading page...");
-        location.reload();
-        break;
+  console.log("WebShield DOM Agent loading for Website ID: {website_id}");
+
+  const allowedTags = ["DIV", "SPAN", "P", "A", "INPUT", "TEXTAREA", "BUTTON"];
+  const suspiciousTags = ["SCRIPT", "IFRAME", "EMBED", "OBJECT", "LINK", "STYLE"];
+
+  function isSuspiciousNode(node) {{
+    if (!node || !node.tagName) return false;
+    return suspiciousTags.includes(node.tagName.toUpperCase());
+  }}
+
+  function handleMutation(mutation) {{
+    if (mutation.type === "childList") {{
+      for (let node of mutation.addedNodes) {{
+        if (isSuspiciousNode(node)) {{
+          alert("Suspicious DOM element added: " + node.tagName);
+          location.reload();
+          return;
+        }}
+      }}
+      for (let node of mutation.removedNodes) {{
+        if (node.nodeType === 1 && !allowedTags.includes(node.tagName.toUpperCase())) {{
+          alert("Important DOM element removed: " + node.tagName);
+          location.reload();
+          return;
+        }}
       }}
     }}
-  }});
+  }}
 
-  observer.observe(document.documentElement || document.body, {{
-    childList: true,
-    subtree: true,
-  }});
+  window.addEventListener("load", function () {{
+    console.log("DOM fully loaded. Starting mutation observer...");
 
-  console.log("✅ DOM protection agent is active.");
+    const observer = new MutationObserver(function (mutationsList) {{
+      for (const mutation of mutationsList) {{
+        handleMutation(mutation);
+      }}
+    }});
+
+    observer.observe(document.body, {{
+      childList: true,
+      subtree: true,
+    }});
+
+    console.log("WebShield DOM Agent activated.");
+  }});
 }})();
-    """
+"""
     return Response(content=js_code, media_type="application/javascript")
-

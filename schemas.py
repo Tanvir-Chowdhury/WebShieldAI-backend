@@ -43,12 +43,10 @@ class SQLPrediction(BaseModel):
     prediction: str
     confidence: float
     
-class DOMLog(BaseModel):
-    website_id: int
-    log: str
 
-class DOMPrediction(BaseModel):
-    prediction: str
-    confidence: float
+class DomLogCreate(BaseModel):
+    website_id: str
     
+class XSSLogCreate(BaseModel):
+    website_id: str
     

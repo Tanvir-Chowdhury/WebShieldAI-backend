@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Tex
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from db import Base
+from sqlalchemy.sql import func
 
 class User(Base):
     __tablename__ = 'users'
@@ -23,7 +24,7 @@ class Website(Base):
     sqli_enabled = Column(Boolean, default=False)
     dom_enabled = Column(Boolean, default=False)
     sql_logs = relationship("SQLLog", back_populates="website")
-    dom_logs = relationship("DOMLog", back_populates="website")
+    dom_logs = relationship("DomManipulationLog", back_populates="website")
     defacement_logs = relationship("DefacementLog", back_populates="website")
 
 class SQLLog(Base):
@@ -38,20 +39,7 @@ class SQLLog(Base):
     
     website = relationship("Website", back_populates="sql_logs")
     
-class DOMLog(Base):
-    __tablename__ = 'dom_logs'
-
-    id = Column(Integer, primary_key=True, index=True)
-    website_id = Column(Integer, ForeignKey('websites.id'))
-    mutations = Column(JSON)  
-    prediction = Column(String)
-    score = Column(Float)   
-    timestamp = Column(DateTime, default=datetime.now)
-
-    website = relationship("Website", back_populates="dom_logs")
     
-    
-# in models.py
 class DefacementLog(Base):
     __tablename__ = 'defacement_logs'
 
@@ -61,3 +49,22 @@ class DefacementLog(Base):
     timestamp = Column(DateTime, default=datetime.now)
 
     website = relationship("Website", back_populates="defacement_logs")
+    
+class DomManipulationLog(Base):
+    __tablename__ = "dom_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey('websites.id'))
+    ip_address = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    website = relationship("Website", back_populates="dom_logs")
+
+
+class XSSLog(Base):
+    __tablename__ = "XSS_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey('websites.id'))
+    ip_address = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

