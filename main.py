@@ -10,6 +10,7 @@ from ml_model import predict_query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from auth import get_current_user
 
 
 app = FastAPI(title="WebShieldAI API")
@@ -67,6 +68,21 @@ async def logout(request: Request):
 @app.post("/websites/", response_model=schemas.GetWebsite)
 async def create_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
     return services.create_website(website, db)
+  
+@app.post("/websites/", response_model=schemas.GetWebsite)
+def add_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
+    return services.create_website(website, db)
+
+@app.get("/websites/", response_model=list[schemas.GetWebsite])
+def list_user_websites(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(models.Website).filter(models.Website.user_id == current_user.id).all()
+
+@app.get("/websites/me")
+def list_user_websites(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.Website).filter(models.Website.user_id == current_user.id).all()
 
 
 @app.post("/predict-sqli/")
@@ -205,11 +221,14 @@ def serve_agent(request: Request):
 @app.get("/cdn/webshield-xss-agent.js")
 def serve_xss_agent(request: Request, db: Session = Depends(get_db)):
     website_id = request.query_params.get("wid", "0")
-  
-    client_ip = request.client.host
+    client_ip = request.headers.get("X-Envoy-External-Address")
+    if not client_ip:
+      client_ip = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP")
+    if not client_ip:
+      client_ip = request.client.host
 
     # Store log immediately in DB (as this JS is being served)
-    new_log = models.DomManipulationLog(
+    new_log = models.XSSLog(
         website_id=website_id,
         ip_address=client_ip
     )
