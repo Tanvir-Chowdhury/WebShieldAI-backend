@@ -23,9 +23,11 @@ class Website(Base):
     defacement_enabled = Column(Boolean, default=False)
     sqli_enabled = Column(Boolean, default=False)
     dom_enabled = Column(Boolean, default=False)
+    xss_enabled = Column(Boolean, default=False)
     sql_logs = relationship("SQLLog", back_populates="website")
     dom_logs = relationship("DomManipulationLog", back_populates="website")
     defacement_logs = relationship("DefacementLog", back_populates="website")
+    XSS_logs = relationship("XSSLog", back_populates="website")
 
 class SQLLog(Base):
     __tablename__ = 'sql_logs'
@@ -56,7 +58,7 @@ class DomManipulationLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     website_id = Column(Integer, ForeignKey('websites.id'))
     ip_address = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     website = relationship("Website", back_populates="dom_logs")
 
@@ -67,4 +69,6 @@ class XSSLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     website_id = Column(Integer, ForeignKey('websites.id'))
     ip_address = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
+    
+    website = relationship("Website", back_populates="XSS_logs")

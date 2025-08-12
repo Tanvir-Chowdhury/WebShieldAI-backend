@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from db import create_table, get_db
 from sqlalchemy.orm import Session
 import models, schemas, services
+from sqlalchemy import Integer, String
 # import defacement_loop 
 from defacement_control import toggle_defacement
 from fastapi import Request
@@ -11,6 +12,8 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from auth import get_current_user
+import requests
+from typing import List, Union, Optional
 
 
 app = FastAPI(title="WebShieldAI API")
@@ -27,7 +30,6 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key="9f2b3a6e5c7c4965b5c3d11ecac7d6f1bd8446e23c4db487915b6a04e7db47bc")
 
 # 9f2b3a6e5c7c4965b5c3d11ecac7d6f1bd8446e23c4db487915b6a04e7db47bc
-# defacement_loop.run_deface_loop(app)
 
 @app.post("/users/", response_model=schemas.GetUser)
 async def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -65,12 +67,12 @@ async def logout(request: Request):
     return {"message": "Logged out successfully"}
 
 
-@app.post("/websites/", response_model=schemas.GetWebsite)
-async def create_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
-    return services.create_website(website, db)
+# @app.post("/websites/", response_model=schemas.GetWebsite)
+# async def create_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
+#     return services.create_website(website, db)
   
 @app.post("/websites/", response_model=schemas.GetWebsite)
-def add_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
+async def add_website(website: schemas.WebsiteCreate, db: Session = Depends(get_db)):
     return services.create_website(website, db)
 
 @app.get("/websites/", response_model=list[schemas.GetWebsite])
@@ -84,15 +86,168 @@ def list_user_websites(
 ):
     return db.query(models.Website).filter(models.Website.user_id == current_user.id).all()
 
+@app.get("/websites/{website_id}", response_model=schemas.GetWebsite)
+def get_website(website_id: int, db: Session = Depends(get_db)):
+    website = db.query(models.Website).filter(models.Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    return website
+
+@app.delete("/websites/{website_id}", status_code=204)
+def delete_website(website_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    website = db.query(models.Website).filter_by(id=website_id, user_id=current_user.id).first()
+
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found or access denied")
+
+    db.delete(website)
+    db.commit()
+    return {"detail": "Website deleted successfully"}
 
 @app.post("/predict-sqli/")
 async def predict_sql_query(input: schemas.SQLQuery, db: Session = Depends(get_db)):
     return services.process_sql_query(input, db)
 
 
-@app.post("/websites/{website_id}/toggle-defacement/")
+@app.post("/websites/{website_id}/toggle-defacement")
 async def toggle_defacement_route(website_id: int, enable: bool):
-    return toggle_defacement(website_id, enable)
+    return await toggle_defacement(website_id, enable)
+  
+# Toggle protection (SQL, XSS, Defacement)
+@app.post("/websites/{website_id}/update-protection")
+def update_protection(
+    website_id: int,
+    payload: schemas.ProtectionUpdate,
+    db: Session = Depends(get_db)
+):
+    website = db.query(models.Website).filter(models.Website.id == website_id).first()
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    if payload.protection_type == "xss":
+        website.xss_enabled = payload.enabled
+    elif payload.protection_type == "sqli":
+        website.sqli_enabled = payload.enabled
+    elif payload.protection_type == "dom":
+        website.dom_enabled = payload.enabled
+    else:
+        raise HTTPException(status_code=400, detail="Invalid protection type")
+
+    db.commit()
+    return {"success": True}
+
+def website_id_filter(col, website_id: int):
+    if isinstance(col.type, Integer):
+        return col == website_id
+    if isinstance(col.type, String):
+        return col == str(website_id)
+    # default fallback
+    return col == website_id
+  
+@app.get("/websites/{website_id}/attack-logs", response_model=List[schemas.AttackLogOut])
+def get_attack_logs(
+    website_id: int,
+    limit: int = Query(500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    # 1) Ensure the website belongs to the logged-in user (or user is allowed)
+    site = (
+        db.query(models.Website)
+        .filter(
+            models.Website.id == website_id,
+            models.Website.user_id == current_user.id,  # adjust if your relation is different
+        )
+        .first()
+    )
+    if not site:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    # 2) Pull from each table
+    xss_rows = (
+        db.query(models.XSSLog)
+        .filter(website_id_filter(models.XSSLog.website_id, website_id))
+        .order_by(models.XSSLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    deface_rows = (
+        db.query(models.DefacementLog)
+        .filter(website_id_filter(models.DefacementLog.website_id, website_id))
+        .order_by(models.DefacementLog.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+
+    dom_rows = (
+        db.query(models.DomManipulationLog)
+        .filter(website_id_filter(models.DomManipulationLog.website_id, website_id))
+        .order_by(models.DomManipulationLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    sql_rows = (
+        db.query(SQLLog)
+        .filter(website_id_filter(SQLLog.website_id, website_id))
+        .order_by(SQLLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    # 3) Normalize to one shape
+    out: List[schemas.AttackLogOut] = []
+
+    for r in xss_rows:
+        out.append(
+            schemas.AttackLogOut(
+                id=r.id,
+                type="xss",
+                website_id=r.website_id,
+                occurred_at=r.created_at,
+                ip_address=getattr(r, "ip_address", None),
+            )
+        )
+
+    for r in deface_rows:
+        out.append(
+            schemas.AttackLogOut(
+                id=r.id,
+                type="defacement",
+                website_id=r.website_id,
+                occurred_at=r.timestamp,
+                prediction=getattr(r, "prediction", None),
+            )
+        )
+
+    for r in dom_rows:
+        out.append(
+            schemas.AttackLogOut(
+                id=r.id,
+                type="dom",
+                website_id=r.website_id,
+                occurred_at=r.created_at,
+                ip_address=getattr(r, "ip_address", None),
+            )
+        )
+
+    for r in sql_rows:
+        out.append(
+            schemas.AttackLogOut(
+                id=r.id,
+                type="sql_injection",
+                website_id=r.website_id,
+                occurred_at=r.created_at,
+                query=getattr(r, "query", None),
+                prediction=getattr(r, "prediction", None),
+                score=getattr(r, "score", None),
+            )
+        )
+
+    # 4) Sort all logs by occurred_at DESC and cap with limit
+    out.sort(key=lambda x: x.occurred_at, reverse=True)
+    return out[:limit]
 
 @app.post("/collect-sqli")
 async def collect_sqli(request: Request, db: Session = Depends(get_db)):
@@ -217,6 +372,31 @@ def serve_agent(request: Request):
 """
 
     return Response(content=js_code, media_type="application/javascript")
+
+@app.get("/check-cdn-code")
+async def check_cdn_code(
+    wid: int,
+    expected_script: str = Query(..., description="Script tag to verify"),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 1. Fetch website by ID
+        website = db.query(models.Website).filter(models.Website.id == wid).first()
+        if not website:
+            return {"success": False, "error": "Website not found"}
+
+        url = website.url
+        response = requests.get(url, timeout=5)
+        html_content = response.text
+
+        # 2. Compare using expected script received from frontend
+        if expected_script in html_content:
+            return {"success": True}
+        else:
+            return {"success": False, "error": "CDN script not found"}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/cdn/webshield-xss-agent.js")
 def serve_xss_agent(request: Request, db: Session = Depends(get_db)):

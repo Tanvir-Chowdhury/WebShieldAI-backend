@@ -14,14 +14,14 @@ DOM:
     const firstDiv = document.querySelector("div");
     if (firstDiv) {
       firstDiv.remove();
-      console.log("✅ A div element was removed");
+      console.log("A div element was removed");
     }
 
     // 3. Add an <iframe> tag (simulate iframe injection)
     const iframe = document.createElement("iframe");
     iframe.src = "https://evil.com";
     document.body.appendChild(iframe);
-    console.log("✅ Iframe injected");
+    console.log("Iframe injected");
   }
 
   // Option 1: Run automatically after 3 seconds
